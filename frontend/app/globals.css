@@ -1,0 +1,72 @@
+@import "tailwindcss";
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  --bg: #080A0F;
+  --surface: #0D1017;
+  --border: #1A1F2E;
+  --text: #E8E8E0;
+  --text-muted: #4A4A55;
+  --accent: #00C2A8;
+  --accent-dim: #00C2A820;
+  --gold: #F59E0B;
+  --danger: #EF4444;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Courier New', monospace;
+  min-height: 100vh;
+}
+
+/* Wallet adapter overrides */
+.wallet-adapter-button {
+  background: var(--accent-dim) !important;
+  border: 1px solid var(--accent) !important;
+  color: var(--accent) !important;
+  font-family: 'Courier New', monospace !important;
+  font-size: 11px !important;
+  letter-spacing: 2px !important;
+  text-transform: uppercase !important;
+  border-radius: 2px !important;
+  padding: 8px 20px !important;
+  transition: all 0.15s !important;
+}
+
+.wallet-adapter-button:hover {
+  background: var(--accent) !important;
+  color: var(--bg) !important;
+}
+
+.wallet-adapter-modal-wrapper {
+  background: var(--surface) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 4px !important;
+  font-family: 'Courier New', monospace !important;
+}
+
+.wallet-adapter-modal-title {
+  color: var(--text) !important;
+  font-family: 'Courier New', monospace !important;
+  font-size: 12px !important;
+  letter-spacing: 3px !important;
+  text-transform: uppercase !important;
+}
+
+::-webkit-scrollbar {
+  width: 4px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+}
