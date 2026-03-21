@@ -5,6 +5,8 @@ import { useWallet } from "@solana/wallet-adapter-react";
 import { PublicKey } from "@solana/web3.js";
 import { getProgram, getWorldPDA, getCharacterPDA, getLeaderboardPDA } from "@/lib/anchor";
 import HUD from "@/components/HUD";
+import TxToast, { type Toast } from "@/components/TxToast";
+import Landing from "@/components/Landing";
 import dynamic from "next/dynamic";
 
 const GameCanvas = dynamic(() => import("@/components/GameCanvas"), { ssr: false });
@@ -36,7 +38,17 @@ export default function Home() {
   const [showLeaderboard, setShowLeaderboard] = useState(false);
   const [leaderboardReady, setLeaderboardReady] = useState(false);
   const [sessionScore, setSessionScore] = useState(0);
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const toastIdRef = useRef(0);
 
+  const addToast = useCallback((signature: string, resourceType: number) => {
+    const id = ++toastIdRef.current;
+    setToasts(prev => [...prev, { id, signature, resourceType, points: resourceType === 2 ? 5 : resourceType === 1 ? 3 : 1 }]);
+  }, []);
+
+  const removeToast = useCallback((id: number) => {
+    setToasts(prev => prev.filter(t => t.id !== id));
+  }, []);
   const walletRef = useRef(wallet);
   const publicKeyRef = useRef(publicKey);
   const connectedRef = useRef(connected);
@@ -161,7 +173,7 @@ export default function Home() {
       const [worldPDA] = getWorldPDA(PROGRAM_ID);
       const [characterPDA] = getCharacterPDA(currentPublicKey, PROGRAM_ID);
       const [leaderboardPDA] = getLeaderboardPDA(PROGRAM_ID);
-      await (program.methods as any)
+      const signature = await (program.methods as any)
         .collectResource(resourceType)
         .accounts({
           world: worldPDA,
@@ -170,6 +182,7 @@ export default function Home() {
           owner: currentPublicKey,
         })
         .rpc();
+      addToast(signature, resourceType);
       await new Promise((r) => setTimeout(r, 2000));
       const program2 = getProgram(currentWallet);
       const world = await (program2.account as any).worldState.fetch(worldPDA);
@@ -223,42 +236,68 @@ export default function Home() {
       )}
 
       {!showGame && (
-        <div style={{
-          width: "100vw",
-          height: "100vh",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          flexDirection: "column",
-          gap: "16px",
-        }}>
-          <div style={{
-            fontSize: "48px",
-            fontWeight: 900,
-            fontFamily: "Georgia, serif",
-            color: "#E8E8E0",
-            letterSpacing: "-2px",
-          }}>ATLAS</div>
-          <div style={{
-            fontSize: "10px",
-            letterSpacing: "5px",
-            color: "#00C2A8",
-            textTransform: "uppercase",
-          }}>World Protocol</div>
-          <div style={{
-            fontSize: "11px",
-            letterSpacing: "2px",
-            color: "#4A4A55",
-            textTransform: "uppercase",
-            marginTop: "16px",
-          }}>
-            {!connected ? "Conecta tu wallet para comenzar"
-              : !worldState ? "Inicializa el mundo para continuar"
-                : !character ? "Mintea tu personaje para entrar"
-                  : "Cargando mundo..."}
-          </div>
-        </div>
+        <>
+          <Landing />
+          {connected && (
+            <div style={{
+              position: "fixed",
+              bottom: "120px",
+              left: "50%",
+              transform: "translateX(-50%)",
+              zIndex: 50,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: "12px",
+            }}>
+              {connected && !worldState && (
+                <button onClick={handleInitWorld} disabled={loading} style={{
+                  padding: "10px 28px",
+                  fontSize: "12px",
+                  letterSpacing: "3px",
+                  textTransform: "uppercase",
+                  border: "1px solid #F59E0B",
+                  background: "#F59E0B11",
+                  color: "#F59E0B",
+                  cursor: loading ? "not-allowed" : "pointer",
+                  fontFamily: "Courier New, monospace",
+                  opacity: loading ? 0.5 : 1,
+                }}>
+                  {loading ? "Inicializando..." : "Init World"}
+                </button>
+              )}
+              {connected && worldState && !character && (
+                <button onClick={handleMintCharacter} disabled={loading} style={{
+                  padding: "10px 28px",
+                  fontSize: "12px",
+                  letterSpacing: "3px",
+                  textTransform: "uppercase",
+                  border: "1px solid #00C2A8",
+                  background: "#00C2A811",
+                  color: "#00C2A8",
+                  cursor: loading ? "not-allowed" : "pointer",
+                  fontFamily: "Courier New, monospace",
+                  opacity: loading ? 0.5 : 1,
+                }}>
+                  {loading ? "Minteando..." : "Mint Character"}
+                </button>
+              )}
+              {connected && worldState && !character && (
+                <div style={{
+                  fontSize: "11px",
+                  color: "#6B7280",
+                  fontFamily: "Courier New, monospace",
+                  letterSpacing: "1px",
+                }}>
+                  {!worldState ? "Inicializa el mundo para continuar"
+                    : "Mintea tu personaje para entrar al mundo"}
+                </div>
+              )}
+            </div>
+          )}
+        </>
       )}
+      <TxToast toasts={toasts} onRemove={removeToast} />
     </main>
   );
 }

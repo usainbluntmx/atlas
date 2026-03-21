@@ -272,10 +272,12 @@ export default class WorldScene extends Phaser.Scene {
         let vy = 0;
         let moving = false;
 
-        if (this.cursors.left.isDown) { vx = -120; this.lastDir = "left"; moving = true; }
-        else if (this.cursors.right.isDown) { vx = 120; this.lastDir = "right"; moving = true; }
-        if (this.cursors.up.isDown) { vy = -120; this.lastDir = "up"; moving = true; }
-        else if (this.cursors.down.isDown) { vy = 120; this.lastDir = "down"; moving = true; }
+        const speed = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SHIFT).isDown ? 240 : 120;
+
+        if (this.cursors.left.isDown) { vx = -speed; this.lastDir = "left"; moving = true; }
+        else if (this.cursors.right.isDown) { vx = speed; this.lastDir = "right"; moving = true; }
+        if (this.cursors.up.isDown) { vy = -speed; this.lastDir = "up"; moving = true; }
+        else if (this.cursors.down.isDown) { vy = speed; this.lastDir = "down"; moving = true; }
 
         if (vx !== 0 && vy !== 0) {
             vx *= 0.707;

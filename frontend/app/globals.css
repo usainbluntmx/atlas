@@ -11,7 +11,7 @@
   --surface: #0D1017;
   --border: #1A1F2E;
   --text: #E8E8E0;
-  --text-muted: #4A4A55;
+  --text-muted: #6B7280;
   --accent: #00C2A8;
   --accent-dim: #00C2A820;
   --gold: #F59E0B;
@@ -31,7 +31,7 @@ body {
   border: 1px solid var(--accent) !important;
   color: var(--accent) !important;
   font-family: 'Courier New', monospace !important;
-  font-size: 11px !important;
+  font-size: 12px !important;
   letter-spacing: 2px !important;
   text-transform: uppercase !important;
   border-radius: 2px !important;
@@ -54,7 +54,7 @@ body {
 .wallet-adapter-modal-title {
   color: var(--text) !important;
   font-family: 'Courier New', monospace !important;
-  font-size: 12px !important;
+  font-size: 14px !important;
   letter-spacing: 3px !important;
   text-transform: uppercase !important;
 }
