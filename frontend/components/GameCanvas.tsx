@@ -1,35 +1,52 @@
 "use client";
 
 import { FC, useEffect, useRef } from "react";
-import type WorldScene from "@/game/scenes/WorldScene";
+import type WorldSceneType from "@/game/scenes/WorldScene";
 
 interface Props {
     characterName: string;
     characterLevel: number;
-    onCollectResource: (id: number) => void;
+    onCollectResource: (id: number, resourceType?: number) => void;
 }
 
 const GameCanvas: FC<Props> = ({ characterName, characterLevel, onCollectResource }) => {
     const gameRef = useRef<any>(null);
+    const onCollectRef = useRef(onCollectResource);
+    const levelRef = useRef(characterLevel);
 
-    // Registrar callback globalmente cada vez que cambie
     useEffect(() => {
-        const registerCallback = async () => {
-            const { setWorldCallback } = await import("@/game/scenes/WorldScene");
-            setWorldCallback(onCollectResource);
-        };
-        registerCallback();
+        onCollectRef.current = onCollectResource;
     }, [onCollectResource]);
+
+    useEffect(() => {
+        levelRef.current = characterLevel;
+        if (!gameRef.current) return;
+        const scene = gameRef.current.scene.getScene("WorldScene") as WorldSceneType | null;
+        scene?.updatePlayerLevel(characterLevel);
+    }, [characterLevel]);
 
     useEffect(() => {
         if (gameRef.current) return;
 
         const initGame = async () => {
             const { createGame } = await import("@/game/main");
-            const { setWorldCallback } = await import("@/game/scenes/WorldScene");
-
-            setWorldCallback(onCollectResource);
+            const { setWorldCallback, setWorldPlayerData } = await import("@/game/scenes/WorldScene");
+            setWorldCallback((id: number, resourceType: number) => onCollectRef.current(id, resourceType));
+            setWorldPlayerData(characterName, characterLevel);
             gameRef.current = createGame("game-container");
+
+            // Esperar a que WorldScene esté activa y pasar el nivel correcto
+            const checkScene = setInterval(() => {
+                if (!gameRef.current) return;
+                const scene = gameRef.current.scene.getScene("WorldScene") as WorldSceneType | null;
+                if (scene && scene.sys.isActive()) {
+                    scene.updatePlayerLevel(levelRef.current);
+                    scene.updatePlayerName(characterName);
+                    clearInterval(checkScene);
+                }
+            }, 100);
+
+            setTimeout(() => clearInterval(checkScene), 5000);
         };
 
         initGame();
@@ -39,12 +56,6 @@ const GameCanvas: FC<Props> = ({ characterName, characterLevel, onCollectResourc
             gameRef.current = null;
         };
     }, []);
-
-    useEffect(() => {
-        if (!gameRef.current) return;
-        const scene = gameRef.current.scene.getScene("WorldScene") as WorldScene | null;
-        scene?.updatePlayerLevel(characterLevel);
-    }, [characterLevel]);
 
     return (
         <div

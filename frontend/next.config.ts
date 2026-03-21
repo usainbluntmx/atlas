@@ -8,9 +8,6 @@ const nextConfig: NextConfig = {
       { protocol: 'https', hostname: 'arweave.net' },
     ],
   },
-  turbopack: {
-    root: __dirname,
-  },
 };
 
 export default nextConfig;

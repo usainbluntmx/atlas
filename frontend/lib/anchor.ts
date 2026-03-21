@@ -12,7 +12,18 @@ export const IDL = {
             accounts: [
                 { name: "world", writable: true, pda: { seeds: [{ kind: "const", value: [119, 111, 114, 108, 100] }] } },
                 { name: "character", writable: true, pda: { seeds: [{ kind: "const", value: [99, 104, 97, 114, 97, 99, 116, 101, 114] }, { kind: "account", path: "owner" }] } },
+                { name: "leaderboard", writable: true, pda: { seeds: [{ kind: "const", value: [108, 101, 97, 100, 101, 114, 98, 111, 97, 114, 100] }] } },
                 { name: "owner", signer: true },
+            ],
+            args: [{ name: "resource_type", type: "u8" }],
+        },
+        {
+            name: "initialize_leaderboard",
+            discriminator: [47, 23, 34, 39, 46, 108, 91, 176],
+            accounts: [
+                { name: "leaderboard", writable: true, pda: { seeds: [{ kind: "const", value: [108, 101, 97, 100, 101, 114, 98, 111, 97, 114, 100] }] } },
+                { name: "authority", writable: true, signer: true },
+                { name: "system_program", address: "11111111111111111111111111111111" },
             ],
             args: [],
         },
@@ -42,6 +53,7 @@ export const IDL = {
     ],
     accounts: [
         { name: "Character", discriminator: [140, 115, 165, 36, 241, 153, 102, 84] },
+        { name: "Leaderboard", discriminator: [247, 186, 238, 243, 194, 30, 9, 36] },
         { name: "WorldState", discriminator: [23, 119, 204, 118, 21, 87, 11, 102] },
     ],
     errors: [
@@ -60,6 +72,28 @@ export const IDL = {
                     { name: "total_resources", type: "u64" },
                     { name: "resources_collected", type: "u64" },
                     { name: "bump", type: "u8" },
+                ],
+            },
+        },
+        {
+            name: "Leaderboard",
+            type: {
+                kind: "struct",
+                fields: [
+                    { name: "entries", type: { vec: { defined: { name: "LeaderboardEntry" } } } },
+                    { name: "bump", type: "u8" },
+                ],
+            },
+        },
+        {
+            name: "LeaderboardEntry",
+            type: {
+                kind: "struct",
+                fields: [
+                    { name: "owner", type: "pubkey" },
+                    { name: "name", type: "string" },
+                    { name: "resources_collected", type: "u64" },
+                    { name: "level", type: "u64" },
                 ],
             },
         },
@@ -106,6 +140,13 @@ export function getCharacterPDA(
 ): [PublicKey, number] {
     return PublicKey.findProgramAddressSync(
         [Buffer.from("character"), owner.toBuffer()],
+        programId
+    );
+}
+
+export function getLeaderboardPDA(programId: PublicKey): [PublicKey, number] {
+    return PublicKey.findProgramAddressSync(
+        [Buffer.from("leaderboard")],
         programId
     );
 }

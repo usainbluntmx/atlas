@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { PublicKey } from "@solana/web3.js";
-import { getProgram, getWorldPDA, getCharacterPDA } from "@/lib/anchor";
+import { getProgram, getWorldPDA, getCharacterPDA, getLeaderboardPDA } from "@/lib/anchor";
 import HUD from "@/components/HUD";
 import dynamic from "next/dynamic";
 
@@ -27,6 +27,15 @@ export default function Home() {
   } | null>(null);
 
   const [loading, setLoading] = useState(false);
+  const [leaderboard, setLeaderboard] = useState<{
+    owner: string;
+    name: string;
+    resourcesCollected: number;
+    level: number;
+  }[]>([]);
+  const [showLeaderboard, setShowLeaderboard] = useState(false);
+  const [leaderboardReady, setLeaderboardReady] = useState(false);
+  const [sessionScore, setSessionScore] = useState(0);
 
   const walletRef = useRef(wallet);
   const publicKeyRef = useRef(publicKey);
@@ -61,6 +70,19 @@ export default function Home() {
       } catch {
         setCharacter(null);
       }
+      const [leaderboardPDA] = getLeaderboardPDA(PROGRAM_ID);
+      try {
+        const lb = await (program.account as any).leaderboard.fetch(leaderboardPDA);
+        setLeaderboard(lb.entries.map((e: any) => ({
+          owner: e.owner.toBase58(),
+          name: e.name,
+          resourcesCollected: Number(e.resourcesCollected),
+          level: Number(e.level),
+        })));
+        setLeaderboardReady(true);
+      } catch {
+        setLeaderboardReady(false);
+      }
     } catch (e) {
       console.error(e);
     }
@@ -88,6 +110,24 @@ export default function Home() {
     }
   };
 
+  const handleInitLeaderboard = async () => {
+    if (!connected) return;
+    setLoading(true);
+    try {
+      const program = getProgram(wallet);
+      const [leaderboardPDA] = getLeaderboardPDA(PROGRAM_ID);
+      await (program.methods as any)
+        .initializeLeaderboard()
+        .accounts({ leaderboard: leaderboardPDA, authority: publicKey })
+        .rpc();
+      await fetchState();
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleMintCharacter = async () => {
     if (!connected || !publicKey) return;
     setLoading(true);
@@ -95,8 +135,6 @@ export default function Home() {
       const { uploadCharacterMetadata } = await import("@/lib/arweave");
       const name = `Explorer_${publicKey.toBase58().slice(0, 4)}`;
       const metadataUri = await uploadCharacterMetadata(wallet, name, 1);
-      console.log("Metadata URI:", metadataUri);
-
       const program = getProgram(wallet);
       const [characterPDA] = getCharacterPDA(publicKey, PROGRAM_ID);
       await (program.methods as any)
@@ -111,20 +149,24 @@ export default function Home() {
     }
   };
 
-  const handleCollectResource = useCallback(async (_id: number) => {
+  const handleCollectResource = useCallback(async (_id: number, resourceType: number = 0) => {
     const currentPublicKey = publicKeyRef.current;
     const currentWallet = walletRef.current;
     const currentConnected = connectedRef.current;
     if (!currentConnected || !currentPublicKey) return;
+    const points = resourceType === 2 ? 5 : resourceType === 1 ? 3 : 1;
+    setSessionScore(prev => prev + points);
     try {
       const program = getProgram(currentWallet);
       const [worldPDA] = getWorldPDA(PROGRAM_ID);
       const [characterPDA] = getCharacterPDA(currentPublicKey, PROGRAM_ID);
+      const [leaderboardPDA] = getLeaderboardPDA(PROGRAM_ID);
       await (program.methods as any)
-        .collectResource()
+        .collectResource(resourceType)
         .accounts({
           world: worldPDA,
           character: characterPDA,
+          leaderboard: leaderboardPDA,
           owner: currentPublicKey,
         })
         .rpc();
@@ -132,6 +174,7 @@ export default function Home() {
       const program2 = getProgram(currentWallet);
       const world = await (program2.account as any).worldState.fetch(worldPDA);
       const char = await (program2.account as any).character.fetch(characterPDA);
+      const lb = await (program2.account as any).leaderboard.fetch(leaderboardPDA);
       setWorldState({
         totalResources: Number(world.totalResources),
         resourcesCollected: Number(world.resourcesCollected),
@@ -141,6 +184,13 @@ export default function Home() {
         level: Number(char.level),
         resourcesCollected: Number(char.resourcesCollected),
       });
+      setLeaderboard(lb.entries.map((e: any) => ({
+        owner: e.owner.toBase58(),
+        name: e.name,
+        resourcesCollected: Number(e.resourcesCollected),
+        level: Number(e.level),
+      })));
+      setLeaderboardReady(true);
     } catch (e) {
       console.error(e);
     }
@@ -155,7 +205,13 @@ export default function Home() {
         worldState={worldState}
         onMintCharacter={handleMintCharacter}
         onInitWorld={handleInitWorld}
+        onInitLeaderboard={handleInitLeaderboard}
         loading={loading}
+        sessionScore={sessionScore}
+        leaderboard={leaderboard}
+        leaderboardReady={leaderboardReady}
+        showLeaderboard={showLeaderboard}
+        onToggleLeaderboard={() => setShowLeaderboard(prev => !prev)}
       />
 
       {showGame && (
