@@ -1,5 +1,4 @@
 import Phaser from "phaser";
-import Player from "../objects/Player";
 
 export interface WorldSceneEvents {
     onCollectResource: (id: number, resourceType: number) => void;
@@ -23,227 +22,286 @@ export interface Resource {
     x: number;
     y: number;
     collected: boolean;
-    type: number; // 0=common, 1=rare, 2=epic
+    type: number;
 }
 
 const RESOURCE_CONFIG = [
-    { color: 0x00C2A8, glowColor: 0x00C2A8, label: "COMMON", points: 1 },
-    { color: 0x818CF8, glowColor: 0x818CF8, label: "RARE", points: 3 },
-    { color: 0xF59E0B, glowColor: 0xF59E0B, label: "EPIC", points: 5 },
+    { frame: 0, color: 0x00C2A8, label: "COMMON", points: 1 },
+    { frame: 1, color: 0x818CF8, label: "RARE", points: 3 },
+    { frame: 2, color: 0xF59E0B, label: "EPIC", points: 5 },
 ];
 
+const TILE_SIZE = 16;
+const SCALE = 3;
+
 export default class WorldScene extends Phaser.Scene {
-    private player: Player | null = null;
-    private resources: Phaser.GameObjects.Container[] = [];
+    private player: Phaser.GameObjects.Sprite | null = null;
+    private nameLabel: Phaser.GameObjects.Text | null = null;
+    private resourceSprites: Phaser.GameObjects.Sprite[] = [];
     private resourceData: Resource[] = [];
     private collectCooldown = false;
-    private playerName = "Explorer";
-    private playerLevel = 1;
+    private cursors: Phaser.Types.Input.Keyboard.CursorKeys | null = null;
+    private lastDir = "down";
+    private treePositions: { x: number; y: number }[] = [];
+    private rockPositions: { x: number; y: number }[] = [];
 
     constructor() {
         super({ key: "WorldScene" });
     }
 
     init(data: any) {
-        if (data?.name) this.playerName = data.name;
-        if (data?.level) this.playerLevel = data.level;
+        if (data?.name) globalPlayerName = data.name;
+        if (data?.level) globalPlayerLevel = data.level;
         if (data?.events?.onCollectResource) {
             globalOnCollect = data.events.onCollectResource;
         }
     }
 
+    preload() {
+        this.load.image("overworld", "/assets/Overworld.png");
+        this.load.spritesheet("character", "/assets/character.png", {
+            frameWidth: 17,
+            frameHeight: 32,
+        });
+        this.load.spritesheet("objects", "/assets/objects.png", {
+            frameWidth: 16,
+            frameHeight: 16,
+        });
+    }
+
     create() {
         const { width, height } = this.scale;
 
-        // Background
-        this.add.rectangle(width / 2, height / 2, width, height, 0x04060A);
+        this.createTileMap(width, height);
+        this.createDecorations(width, height);
 
-        // Starfield
-        const stars = this.add.graphics();
-        for (let i = 0; i < 120; i++) {
-            const x = Phaser.Math.Between(0, width);
-            const y = Phaser.Math.Between(0, height);
-            const size = Phaser.Math.FloatBetween(0.5, 2);
-            const alpha = Phaser.Math.FloatBetween(0.2, 0.8);
-            stars.fillStyle(0xE8E8E0, alpha);
-            stars.fillCircle(x, y, size);
+        if (this.input.keyboard) {
+            this.cursors = this.input.keyboard.createCursorKeys();
         }
 
-        // Grid
-        const grid = this.add.graphics();
-        grid.lineStyle(1, 0x0D1420, 0.6);
-        for (let x = 0; x < width; x += 60) {
-            grid.moveTo(x, 0);
-            grid.lineTo(x, height);
-        }
-        for (let y = 0; y < height; y += 60) {
-            grid.moveTo(0, y);
-            grid.lineTo(width, y);
-        }
-        grid.strokePath();
+        this.createAnimations();
 
-        // Ambient glows
-        const glow1 = this.add.graphics();
-        glow1.fillStyle(0x00C2A8, 0.03);
-        glow1.fillCircle(width * 0.2, height * 0.3, 200);
-        const glow2 = this.add.graphics();
-        glow2.fillStyle(0xF59E0B, 0.03);
-        glow2.fillCircle(width * 0.8, height * 0.7, 180);
-
-        // Obstacles
-        this.spawnObstacles(width, height);
-
-        // Resources — distribution: 6 common, 3 rare, 1 epic
+        // Spawn resources en zonas seguras
         const typeDistribution = [0, 0, 0, 0, 0, 0, 1, 1, 1, 2];
-        this.resourceData = Array.from({ length: 10 }, (_, i) => ({
-            id: i,
-            x: Phaser.Math.Between(80, width - 80),
-            y: Phaser.Math.Between(120, height - 80),
-            collected: false,
-            type: typeDistribution[i],
-        }));
 
-        this.resources = [];
+        const isBlocked = (x: number, y: number): boolean => {
+            const nearTree = this.treePositions.some(t =>
+                Math.sqrt((x - t.x) ** 2 + (y - t.y) ** 2) < 60
+            );
+            const nearRock = this.rockPositions.some(r =>
+                Math.sqrt((x - r.x) ** 2 + (y - r.y) ** 2) < 50
+            );
+            const nearEdge = x < 100 || x > width - 100 || y < 120 || y > height - 100;
+            return nearTree || nearRock || nearEdge;
+        };
+
+        this.resourceData = Array.from({ length: 10 }, (_, i) => {
+            let x = 0, y = 0;
+            let attempts = 0;
+            do {
+                x = Phaser.Math.Between(100, width - 100);
+                y = Phaser.Math.Between(120, height - 100);
+                attempts++;
+            } while (isBlocked(x, y) && attempts < 100);
+
+            return { id: i, x, y, collected: false, type: typeDistribution[i] };
+        });
+
+        this.resourceSprites = [];
         this.resourceData.forEach((r) => {
             const cfg = RESOURCE_CONFIG[r.type];
-            const container = this.add.container(r.x, r.y);
+            const sprite = this.add.sprite(r.x, r.y, "objects", cfg.frame);
+            sprite.setScale(SCALE);
+            sprite.setDepth(6);
 
-            // Outer ring
-            const ring = this.add.graphics();
-            ring.lineStyle(1, cfg.color, 0.3);
-            ring.strokeCircle(0, 0, r.type === 2 ? 24 : r.type === 1 ? 20 : 16);
-            container.add(ring);
-
-            // Diamond
-            const size = r.type === 2 ? 10 : r.type === 1 ? 8 : 6;
-            const diamond = this.add.graphics();
-            diamond.fillStyle(cfg.color, 1);
-            diamond.fillPoints([
-                { x: 0, y: -size },
-                { x: size, y: 0 },
-                { x: 0, y: size },
-                { x: -size, y: 0 },
-            ], true);
-            container.add(diamond);
-
-            // Center dot
-            const dot = this.add.graphics();
-            dot.fillStyle(0xFFFFFF, 0.9);
-            dot.fillCircle(0, 0, r.type === 2 ? 3 : 2);
-            container.add(dot);
-
-            // Type label for rare/epic
-            if (r.type > 0) {
-                const label = this.add.text(0, -28, cfg.label, {
-                    fontSize: "7px",
-                    color: `#${cfg.color.toString(16).padStart(6, '0')}`,
-                    fontFamily: "Courier New, monospace",
-                    letterSpacing: 2,
-                }).setOrigin(0.5);
-                container.add(label);
-            }
-
-            // Float animation
             this.tweens.add({
-                targets: container,
+                targets: sprite,
                 y: r.y - 6,
-                duration: 1500 + Phaser.Math.Between(0, 500),
+                duration: 1200 + Phaser.Math.Between(0, 400),
                 yoyo: true,
                 repeat: -1,
                 ease: "Sine.easeInOut",
             });
 
-            // Pulse ring
-            this.tweens.add({
-                targets: ring,
-                alpha: 0,
-                scaleX: 2,
-                scaleY: 2,
-                duration: 1800 + r.type * 400,
-                repeat: -1,
-                ease: "Quad.easeOut",
-            });
+            if (r.type > 0) {
+                const label = this.add.text(r.x, r.y - 30, cfg.label, {
+                    fontSize: "7px",
+                    color: `#${cfg.color.toString(16).padStart(6, '0')}`,
+                    fontFamily: "Courier New, monospace",
+                    letterSpacing: 1,
+                }).setOrigin(0.5).setDepth(7);
+                this.tweens.add({
+                    targets: label,
+                    y: r.y - 36,
+                    duration: 1200 + Phaser.Math.Between(0, 400),
+                    yoyo: true,
+                    repeat: -1,
+                    ease: "Sine.easeInOut",
+                });
+            }
 
-            this.resources.push(container);
+            this.resourceSprites.push(sprite);
         });
 
         // Player
-        this.player = new Player(this, width / 2, height / 2, globalPlayerName, globalPlayerLevel);
+        this.player = this.add.sprite(width / 2, height / 2, "character", 0);
+        this.player.setScale(SCALE);
+        this.player.setDepth(8);
+        this.player.play("walk-down-idle");
 
-        // World label
+        this.nameLabel = this.add.text(width / 2, height / 2 - 36, globalPlayerName, {
+            fontSize: "9px",
+            color: "#00C2A8",
+            fontFamily: "Courier New, monospace",
+            letterSpacing: 1,
+        }).setOrigin(0.5).setDepth(9);
+
         this.add.text(24, height - 48, "ATLAS WORLD · DEVNET", {
             fontSize: "9px",
-            color: "#1A2030",
+            color: "#3A5C28",
             fontFamily: "Courier New, monospace",
             letterSpacing: 3,
-        }).setOrigin(0, 1);
+        }).setOrigin(0, 1).setDepth(10);
 
-        // Legend
         this.add.text(width - 24, height - 48,
             "◆ COMMON +1   ◆ RARE +3   ◆ EPIC +5", {
             fontSize: "8px",
-            color: "#1A2030",
+            color: "#3A5C28",
             fontFamily: "Courier New, monospace",
-            letterSpacing: 1,
-        }).setOrigin(1, 1);
+        }).setOrigin(1, 1).setDepth(10);
     }
 
-    private spawnObstacles(width: number, height: number) {
-        const positions = [
-            { x: width * 0.25, y: height * 0.25 },
-            { x: width * 0.75, y: height * 0.25 },
-            { x: width * 0.25, y: height * 0.75 },
-            { x: width * 0.75, y: height * 0.75 },
-            { x: width * 0.5, y: height * 0.4 },
+    private createAnimations() {
+        const dirs = [
+            { key: "down", row: 0 },
+            { key: "right", row: 1 },
+            { key: "up", row: 2 },
+            { key: "left", row: 3 },
         ];
 
-        positions.forEach((pos) => {
-            const g = this.add.graphics();
-            g.lineStyle(1, 0x1A2030, 0.8);
-            g.fillStyle(0x0A0E16, 1);
-            const size = Phaser.Math.Between(24, 40);
-            g.fillRect(-size / 2, -size / 2, size, size);
-            g.strokeRect(-size / 2, -size / 2, size, size);
-            g.x = pos.x;
-            g.y = pos.y;
+        dirs.forEach(({ key, row }) => {
+            const start = row * 16;
+            if (!this.anims.exists(`walk-${key}`)) {
+                this.anims.create({
+                    key: `walk-${key}`,
+                    frames: this.anims.generateFrameNumbers("character", { start, end: start + 2 }),
+                    frameRate: 8,
+                    repeat: -1,
+                });
+            }
+            if (!this.anims.exists(`walk-${key}-idle`)) {
+                this.anims.create({
+                    key: `walk-${key}-idle`,
+                    frames: this.anims.generateFrameNumbers("character", { start: start + 1, end: start + 1 }),
+                    frameRate: 1,
+                    repeat: 0,
+                });
+            }
+        });
+    }
 
-            // Corner accents
-            const accent = this.add.graphics();
-            accent.lineStyle(1, 0x00C2A8, 0.2);
-            accent.moveTo(-size / 2, -size / 2 + 6);
-            accent.lineTo(-size / 2, -size / 2);
-            accent.lineTo(-size / 2 + 6, -size / 2);
-            accent.moveTo(size / 2 - 6, size / 2);
-            accent.lineTo(size / 2, size / 2);
-            accent.lineTo(size / 2, size / 2 - 6);
-            accent.strokePath();
-            accent.x = pos.x;
-            accent.y = pos.y;
+    private createTileMap(width: number, height: number) {
+        const tilesX = Math.ceil(width / (TILE_SIZE * SCALE)) + 1;
+        const tilesY = Math.ceil(height / (TILE_SIZE * SCALE)) + 1;
+
+        this.add.rectangle(width / 2, height / 2, width, height, 0x2D4A1E).setDepth(0);
+
+        const g = this.add.graphics().setDepth(0);
+
+        for (let ty = 0; ty < tilesY; ty++) {
+            for (let tx = 0; tx < tilesX; tx++) {
+                const px = tx * TILE_SIZE * SCALE;
+                const py = ty * TILE_SIZE * SCALE;
+                const variant = (tx + ty) % 3;
+                const color = variant === 0 ? 0x2D4A1E : variant === 1 ? 0x3A5C28 : 0x2A4520;
+                g.fillStyle(color, 1);
+                g.fillRect(px, py, TILE_SIZE * SCALE, TILE_SIZE * SCALE);
+            }
+        }
+
+        const midX = Math.floor(tilesX / 2);
+        const midY = Math.floor(tilesY / 2);
+        g.fillStyle(0x7A6040, 1);
+        for (let tx = 0; tx < tilesX; tx++) {
+            g.fillRect(tx * TILE_SIZE * SCALE, midY * TILE_SIZE * SCALE, TILE_SIZE * SCALE, TILE_SIZE * SCALE);
+        }
+        for (let ty = 0; ty < tilesY; ty++) {
+            g.fillRect(midX * TILE_SIZE * SCALE, ty * TILE_SIZE * SCALE, TILE_SIZE * SCALE, TILE_SIZE * SCALE);
+        }
+    }
+
+    private createDecorations(width: number, height: number) {
+        this.treePositions = [
+            { x: 60, y: 60 }, { x: width - 60, y: 60 },
+            { x: 60, y: height - 60 }, { x: width - 60, y: height - 60 },
+            { x: width * 0.25, y: 80 }, { x: width * 0.75, y: 80 },
+            { x: width * 0.25, y: height - 80 }, { x: width * 0.75, y: height - 80 },
+        ];
+
+        this.treePositions.forEach(pos => {
+            const g = this.add.graphics().setDepth(2);
+            g.fillStyle(0x5C3A1E, 1);
+            g.fillRect(pos.x - 6, pos.y - 4, 12, 20);
+            g.fillStyle(0x2D6A1E, 1);
+            g.fillCircle(pos.x, pos.y - 12, 18);
+            g.fillStyle(0x3A8A28, 1);
+            g.fillCircle(pos.x - 6, pos.y - 16, 12);
+            g.fillCircle(pos.x + 6, pos.y - 16, 12);
+        });
+
+        this.rockPositions = [
+            { x: width * 0.3, y: height * 0.3 },
+            { x: width * 0.7, y: height * 0.3 },
+            { x: width * 0.3, y: height * 0.7 },
+            { x: width * 0.7, y: height * 0.7 },
+        ];
+
+        this.rockPositions.forEach(pos => {
+            const g = this.add.graphics().setDepth(2);
+            g.fillStyle(0x666870, 1);
+            g.fillEllipse(pos.x, pos.y, 32, 22);
+            g.fillStyle(0x888A92, 1);
+            g.fillEllipse(pos.x - 4, pos.y - 4, 20, 14);
         });
     }
 
     update() {
-        if (!this.player) return;
+        if (!this.player || !this.cursors) return;
 
-        const cursors = this.input.keyboard!.createCursorKeys();
         let vx = 0;
         let vy = 0;
+        let moving = false;
 
-        if (cursors.left.isDown) vx = -160;
-        else if (cursors.right.isDown) vx = 160;
-        if (cursors.up.isDown) vy = -160;
-        else if (cursors.down.isDown) vy = 160;
+        if (this.cursors.left.isDown) { vx = -120; this.lastDir = "left"; moving = true; }
+        else if (this.cursors.right.isDown) { vx = 120; this.lastDir = "right"; moving = true; }
+        if (this.cursors.up.isDown) { vy = -120; this.lastDir = "up"; moving = true; }
+        else if (this.cursors.down.isDown) { vy = 120; this.lastDir = "down"; moving = true; }
 
         if (vx !== 0 && vy !== 0) {
             vx *= 0.707;
             vy *= 0.707;
         }
 
-        (this.player as any).setMoving(vx, vy);
-
         const { width, height } = this.scale;
         this.player.x = Phaser.Math.Clamp(this.player.x + vx * (1 / 60), 20, width - 20);
         this.player.y = Phaser.Math.Clamp(this.player.y + vy * (1 / 60), 60, height - 40);
+
+        if (this.nameLabel) {
+            this.nameLabel.x = this.player.x;
+            this.nameLabel.y = this.player.y - 36;
+        }
+
+        if (moving) {
+            const animKey = `walk-${this.lastDir}`;
+            if (this.player.anims.currentAnim?.key !== animKey) {
+                this.player.play(animKey);
+            }
+        } else {
+            const idleKey = `walk-${this.lastDir}-idle`;
+            if (this.player.anims.currentAnim?.key !== idleKey) {
+                this.player.play(idleKey);
+            }
+        }
 
         this.checkResourceCollision();
     }
@@ -260,49 +318,45 @@ export default class WorldScene extends Phaser.Scene {
 
             if (dist < 32) {
                 r.collected = true;
-                const container = this.resources[i];
+                const sprite = this.resourceSprites[i];
                 const cfg = RESOURCE_CONFIG[r.type];
 
                 this.tweens.add({
-                    targets: container,
-                    scaleX: 2,
-                    scaleY: 2,
-                    alpha: 0,
-                    duration: 400,
-                    ease: "Quad.easeOut",
-                    onComplete: () => container.setVisible(false),
+                    targets: sprite,
+                    scaleX: 0, scaleY: 0, alpha: 0,
+                    duration: 300,
+                    ease: "Quad.easeIn",
+                    onComplete: () => sprite.setVisible(false),
                 });
 
-                // Score popup
                 const popup = this.add.text(r.x, r.y - 20, `+${cfg.points}`, {
                     fontSize: "14px",
                     fontStyle: "bold",
                     color: `#${cfg.color.toString(16).padStart(6, '0')}`,
                     fontFamily: "Courier New, monospace",
-                }).setOrigin(0.5);
+                }).setOrigin(0.5).setDepth(10);
+
                 this.tweens.add({
                     targets: popup,
-                    y: r.y - 60,
-                    alpha: 0,
+                    y: r.y - 60, alpha: 0,
                     duration: 800,
                     ease: "Quad.easeOut",
                     onComplete: () => popup.destroy(),
                 });
 
-                // Particle burst
                 for (let p = 0; p < 6 + r.type * 2; p++) {
                     const angle = (p / (6 + r.type * 2)) * Math.PI * 2;
-                    const particle = this.add.graphics();
+                    const particle = this.add.graphics().setDepth(9);
                     particle.fillStyle(cfg.color, 1);
-                    particle.fillCircle(0, 0, 2 + r.type);
+                    particle.fillCircle(0, 0, 3 + r.type);
                     particle.x = r.x;
                     particle.y = r.y;
                     this.tweens.add({
                         targets: particle,
-                        x: r.x + Math.cos(angle) * (40 + r.type * 20),
-                        y: r.y + Math.sin(angle) * (40 + r.type * 20),
+                        x: r.x + Math.cos(angle) * (50 + r.type * 20),
+                        y: r.y + Math.sin(angle) * (50 + r.type * 20),
                         alpha: 0,
-                        duration: 500 + r.type * 100,
+                        duration: 600,
                         ease: "Quad.easeOut",
                         onComplete: () => particle.destroy(),
                     });
@@ -320,11 +374,10 @@ export default class WorldScene extends Phaser.Scene {
 
     updatePlayerLevel(level: number) {
         globalPlayerLevel = level;
-        this.player?.updateLevel(level);
     }
 
     updatePlayerName(name: string) {
-        this.playerName = name;
-        this.player?.updateName(name);
+        globalPlayerName = name;
+        if (this.nameLabel) this.nameLabel.setText(name);
     }
 }
