@@ -67,10 +67,10 @@ El mundo es compartido: lo que un jugador recolecta ya no está disponible para 
 ---
 
 ## Arquitectura
-```
 
 ![Diagrama de arquitectura de Atlas](docs/architecture.png)
 
+```
 atlas/
 ├── programs/atlas/src/lib.rs    # Smart contract (Anchor)
 │   ├── initialize_world()       # Crea el mundo compartido
