@@ -72,19 +72,8 @@ export default function Home() {
         const world = await (program.account as any).worldState.fetch(worldPDA);
         const resourcesCollected = Number(world.resourcesCollected);
         const totalResources = Number(world.totalResources);
-
-        setWorldState({
-          totalResources,
-          resourcesCollected,
-        });
-
-        // Detect exhausted world
-        if (resourcesCollected >= totalResources) {
-          setWorldExhausted(true);
-        } else {
-          setWorldExhausted(false);
-        }
-
+        setWorldState({ totalResources, resourcesCollected });
+        setWorldExhausted(resourcesCollected >= totalResources);
       } catch {
         setWorldState(null);
       }
@@ -216,8 +205,6 @@ export default function Home() {
       const resourcesCollected = Number(world.resourcesCollected);
       const totalResources = Number(world.totalResources);
 
-      // Epoch changed — world reset on-chain
-      // Detect world reset: resources_collected went back to 0
       if (resourcesCollected === 0 || resourcesCollected < (worldState?.resourcesCollected ?? 0)) {
         setGeneratingWorld(true);
         setTimeout(() => {
@@ -227,23 +214,13 @@ export default function Home() {
         }, 3000);
       }
 
-      if (resourcesCollected >= totalResources) {
-        setWorldExhausted(true);
-      } else {
-        setWorldExhausted(false);
-      }
-
-      setWorldState({
-        totalResources,
-        resourcesCollected,
-      });
-
+      setWorldExhausted(resourcesCollected >= totalResources);
+      setWorldState({ totalResources, resourcesCollected });
       setCharacter({
         name: char.name,
         level: Number(char.level),
         resourcesCollected: Number(char.resourcesCollected),
       });
-
       setLeaderboard(lb.entries.map((e: any) => ({
         owner: e.owner.toBase58(),
         name: e.name,
@@ -262,7 +239,6 @@ export default function Home() {
   return (
     <main style={{ width: "100vw", height: "100vh", overflow: "hidden", background: "#080A0F" }}>
 
-      {/* Generating new world screen */}
       {generatingWorld && (
         <div style={{
           position: "fixed", inset: 0, zIndex: 300,
@@ -284,11 +260,6 @@ export default function Home() {
           }}>
             Generando nuevo mundo...
           </div>
-          <div style={{
-            fontSize: "11px", color: "#4A5568",
-            fontFamily: "Courier New, monospace", letterSpacing: "2px",
-          }}>
-          </div>
           <style>{`
             @keyframes spin {
               0% { transform: rotate(45deg); }
@@ -298,7 +269,6 @@ export default function Home() {
         </div>
       )}
 
-      {/* World exhausted overlay */}
       {worldExhausted && !generatingWorld && showGame && (
         <div style={{
           position: "fixed", inset: 0, zIndex: 250,
@@ -353,55 +323,7 @@ export default function Home() {
         />
       )}
 
-      {!showGame && (
-        <>
-          <Landing />
-          {connected && (
-            <div style={{
-              position: "fixed",
-              bottom: "120px",
-              left: "50%",
-              transform: "translateX(-50%)",
-              zIndex: 50,
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              gap: "12px",
-            }}>
-              {connected && !worldState && (
-                <button onClick={handleInitWorld} disabled={loading} style={{
-                  padding: "10px 28px", fontSize: "12px", letterSpacing: "3px",
-                  textTransform: "uppercase", border: "1px solid #F59E0B",
-                  background: "#F59E0B11", color: "#F59E0B",
-                  cursor: loading ? "not-allowed" : "pointer",
-                  fontFamily: "Courier New, monospace", opacity: loading ? 0.5 : 1,
-                }}>
-                  {loading ? "Inicializando..." : "Init World"}
-                </button>
-              )}
-              {connected && worldState && !character && (
-                <button onClick={handleMintCharacter} disabled={loading} style={{
-                  padding: "10px 28px", fontSize: "12px", letterSpacing: "3px",
-                  textTransform: "uppercase", border: "1px solid #00C2A8",
-                  background: "#00C2A811", color: "#00C2A8",
-                  cursor: loading ? "not-allowed" : "pointer",
-                  fontFamily: "Courier New, monospace", opacity: loading ? 0.5 : 1,
-                }}>
-                  {loading ? "Minteando..." : "Mint Character"}
-                </button>
-              )}
-              {connected && worldState && !character && (
-                <div style={{
-                  fontSize: "11px", color: "#6B7280",
-                  fontFamily: "Courier New, monospace", letterSpacing: "1px",
-                }}>
-                  Mintea tu personaje para entrar al mundo
-                </div>
-              )}
-            </div>
-          )}
-        </>
-      )}
+      {!showGame && <Landing />}
 
       <TxToast toasts={toasts} onRemove={removeToast} />
     </main>

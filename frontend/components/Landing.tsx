@@ -1,12 +1,6 @@
 "use client";
 
 import { FC } from "react";
-import dynamic from "next/dynamic";
-
-const WalletMultiButton = dynamic(
-    () => import("@solana/wallet-adapter-react-ui").then((m) => m.WalletMultiButton),
-    { ssr: false }
-);
 
 const Landing: FC = () => {
     return (
@@ -198,23 +192,14 @@ const Landing: FC = () => {
                         color: "#6B7280",
                         letterSpacing: "2px",
                         textTransform: "uppercase",
-                        marginBottom: "4px",
                     }}>
-                        Conecta tu wallet para jugar
-                    </div>
-                    <WalletMultiButton />
-                    <div style={{
-                        fontSize: "10px",
-                        color: "#6B7280",
-                        letterSpacing: "1px",
-                    }}>
-                        Solana Devnet · Sin costo real · Solo curiosidad
+                        Conecta tu wallet desde el HUD para jugar
                     </div>
                     <button
                         onClick={() => window.open("https://github.com/usainbluntmx/atlas", "_blank")}
                         style={{
-                            padding: "10px 22px",
-                            fontSize: "12px",
+                            padding: "8px 20px",
+                            fontSize: "11px",
                             letterSpacing: "3px",
                             textTransform: "uppercase",
                             border: "1px solid #1A1F2E",

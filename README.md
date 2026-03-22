@@ -134,9 +134,9 @@ npm run dev
 
 ## Construido en
 
-**Hackathon Solana 2026** — Track: Gaming
+**Solana LATAM Hackathon | WayLearn** — Track: Gaming
 
-Construido en 48 horas por [@usainbluntmx](https://github.com/usainbluntmx)
+Construido por [@usainbluntmx](https://github.com/usainbluntmx)
 
 ---
 
