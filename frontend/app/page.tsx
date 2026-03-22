@@ -39,16 +39,10 @@ export default function Home() {
   const [leaderboardReady, setLeaderboardReady] = useState(false);
   const [sessionScore, setSessionScore] = useState(0);
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [worldExhausted, setWorldExhausted] = useState(false);
+  const [generatingWorld, setGeneratingWorld] = useState(false);
+
   const toastIdRef = useRef(0);
-
-  const addToast = useCallback((signature: string, resourceType: number) => {
-    const id = ++toastIdRef.current;
-    setToasts(prev => [...prev, { id, signature, resourceType, points: resourceType === 2 ? 5 : resourceType === 1 ? 3 : 1 }]);
-  }, []);
-
-  const removeToast = useCallback((id: number) => {
-    setToasts(prev => prev.filter(t => t.id !== id));
-  }, []);
   const walletRef = useRef(wallet);
   const publicKeyRef = useRef(publicKey);
   const connectedRef = useRef(connected);
@@ -57,6 +51,18 @@ export default function Home() {
   useEffect(() => { publicKeyRef.current = publicKey; }, [publicKey]);
   useEffect(() => { connectedRef.current = connected; }, [connected]);
 
+  const addToast = useCallback((signature: string, resourceType: number) => {
+    const id = ++toastIdRef.current;
+    setToasts(prev => [...prev, {
+      id, signature, resourceType,
+      points: resourceType === 2 ? 5 : resourceType === 1 ? 3 : 1
+    }]);
+  }, []);
+
+  const removeToast = useCallback((id: number) => {
+    setToasts(prev => prev.filter(t => t.id !== id));
+  }, []);
+
   const fetchState = useCallback(async () => {
     if (!connected || !publicKey) return;
     try {
@@ -64,13 +70,25 @@ export default function Home() {
       const [worldPDA] = getWorldPDA(PROGRAM_ID);
       try {
         const world = await (program.account as any).worldState.fetch(worldPDA);
+        const resourcesCollected = Number(world.resourcesCollected);
+        const totalResources = Number(world.totalResources);
+
         setWorldState({
-          totalResources: Number(world.totalResources),
-          resourcesCollected: Number(world.resourcesCollected),
+          totalResources,
+          resourcesCollected,
         });
+
+        // Detect exhausted world
+        if (resourcesCollected >= totalResources) {
+          setWorldExhausted(true);
+        } else {
+          setWorldExhausted(false);
+        }
+
       } catch {
         setWorldState(null);
       }
+
       const [characterPDA] = getCharacterPDA(publicKey, PROGRAM_ID);
       try {
         const char = await (program.account as any).character.fetch(characterPDA);
@@ -82,6 +100,7 @@ export default function Home() {
       } catch {
         setCharacter(null);
       }
+
       const [leaderboardPDA] = getLeaderboardPDA(PROGRAM_ID);
       try {
         const lb = await (program.account as any).leaderboard.fetch(leaderboardPDA);
@@ -166,13 +185,16 @@ export default function Home() {
     const currentWallet = walletRef.current;
     const currentConnected = connectedRef.current;
     if (!currentConnected || !currentPublicKey) return;
+
     const points = resourceType === 2 ? 5 : resourceType === 1 ? 3 : 1;
     setSessionScore(prev => prev + points);
+
     try {
       const program = getProgram(currentWallet);
       const [worldPDA] = getWorldPDA(PROGRAM_ID);
       const [characterPDA] = getCharacterPDA(currentPublicKey, PROGRAM_ID);
       const [leaderboardPDA] = getLeaderboardPDA(PROGRAM_ID);
+
       const signature = await (program.methods as any)
         .collectResource(resourceType)
         .accounts({
@@ -182,21 +204,46 @@ export default function Home() {
           owner: currentPublicKey,
         })
         .rpc();
+
       addToast(signature, resourceType);
       await new Promise((r) => setTimeout(r, 2000));
+
       const program2 = getProgram(currentWallet);
       const world = await (program2.account as any).worldState.fetch(worldPDA);
       const char = await (program2.account as any).character.fetch(characterPDA);
       const lb = await (program2.account as any).leaderboard.fetch(leaderboardPDA);
+
+      const resourcesCollected = Number(world.resourcesCollected);
+      const totalResources = Number(world.totalResources);
+
+      // Epoch changed — world reset on-chain
+      // Detect world reset: resources_collected went back to 0
+      if (resourcesCollected === 0 || resourcesCollected < (worldState?.resourcesCollected ?? 0)) {
+        setGeneratingWorld(true);
+        setTimeout(() => {
+          setGeneratingWorld(false);
+          setWorldExhausted(false);
+          setSessionScore(0);
+        }, 3000);
+      }
+
+      if (resourcesCollected >= totalResources) {
+        setWorldExhausted(true);
+      } else {
+        setWorldExhausted(false);
+      }
+
       setWorldState({
-        totalResources: Number(world.totalResources),
-        resourcesCollected: Number(world.resourcesCollected),
+        totalResources,
+        resourcesCollected,
       });
+
       setCharacter({
         name: char.name,
         level: Number(char.level),
         resourcesCollected: Number(char.resourcesCollected),
       });
+
       setLeaderboard(lb.entries.map((e: any) => ({
         owner: e.owner.toBase58(),
         name: e.name,
@@ -204,6 +251,7 @@ export default function Home() {
         level: Number(e.level),
       })));
       setLeaderboardReady(true);
+
     } catch (e) {
       console.error(e);
     }
@@ -213,6 +261,76 @@ export default function Home() {
 
   return (
     <main style={{ width: "100vw", height: "100vh", overflow: "hidden", background: "#080A0F" }}>
+
+      {/* Generating new world screen */}
+      {generatingWorld && (
+        <div style={{
+          position: "fixed", inset: 0, zIndex: 300,
+          background: "#04060A",
+          display: "flex", flexDirection: "column",
+          alignItems: "center", justifyContent: "center",
+          gap: "24px",
+        }}>
+          <div style={{
+            width: "40px", height: "40px",
+            border: "2px solid #00C2A8",
+            transform: "rotate(45deg)",
+            animation: "spin 1s linear infinite",
+          }} />
+          <div style={{
+            fontSize: "13px", letterSpacing: "6px",
+            color: "#00C2A8", textTransform: "uppercase",
+            fontFamily: "Courier New, monospace",
+          }}>
+            Generando nuevo mundo...
+          </div>
+          <div style={{
+            fontSize: "11px", color: "#4A5568",
+            fontFamily: "Courier New, monospace", letterSpacing: "2px",
+          }}>
+          </div>
+          <style>{`
+            @keyframes spin {
+              0% { transform: rotate(45deg); }
+              100% { transform: rotate(405deg); }
+            }
+          `}</style>
+        </div>
+      )}
+
+      {/* World exhausted overlay */}
+      {worldExhausted && !generatingWorld && showGame && (
+        <div style={{
+          position: "fixed", inset: 0, zIndex: 250,
+          background: "#04060ACC",
+          display: "flex", flexDirection: "column",
+          alignItems: "center", justifyContent: "center",
+          gap: "16px", backdropFilter: "blur(4px)",
+        }}>
+          <div style={{
+            fontSize: "40px", fontWeight: 900,
+            fontFamily: "Georgia, serif", color: "#F59E0B",
+            letterSpacing: "-1px",
+          }}>Mundo Agotado</div>
+          <div style={{
+            fontSize: "13px", color: "#9CA3AF",
+            fontFamily: "Courier New, monospace", letterSpacing: "2px",
+            textAlign: "center", maxWidth: "400px", lineHeight: 1.7,
+          }}>
+            Todos los recursos han sido recolectados.<br />
+            El siguiente explorador que intente recolectar<br />
+            generará un nuevo mundo automáticamente.
+          </div>
+          <div style={{
+            fontSize: "11px", color: "#4A5568",
+            fontFamily: "Courier New, monospace", letterSpacing: "2px",
+            marginTop: "8px",
+          }}>
+            {worldState?.resourcesCollected}/{worldState?.totalResources} RECURSOS RECOLECTADOS
+          </div>
+        </div>
+      )}
+
       <HUD
         character={character}
         worldState={worldState}
@@ -252,51 +370,39 @@ export default function Home() {
             }}>
               {connected && !worldState && (
                 <button onClick={handleInitWorld} disabled={loading} style={{
-                  padding: "10px 28px",
-                  fontSize: "12px",
-                  letterSpacing: "3px",
-                  textTransform: "uppercase",
-                  border: "1px solid #F59E0B",
-                  background: "#F59E0B11",
-                  color: "#F59E0B",
+                  padding: "10px 28px", fontSize: "12px", letterSpacing: "3px",
+                  textTransform: "uppercase", border: "1px solid #F59E0B",
+                  background: "#F59E0B11", color: "#F59E0B",
                   cursor: loading ? "not-allowed" : "pointer",
-                  fontFamily: "Courier New, monospace",
-                  opacity: loading ? 0.5 : 1,
+                  fontFamily: "Courier New, monospace", opacity: loading ? 0.5 : 1,
                 }}>
                   {loading ? "Inicializando..." : "Init World"}
                 </button>
               )}
               {connected && worldState && !character && (
                 <button onClick={handleMintCharacter} disabled={loading} style={{
-                  padding: "10px 28px",
-                  fontSize: "12px",
-                  letterSpacing: "3px",
-                  textTransform: "uppercase",
-                  border: "1px solid #00C2A8",
-                  background: "#00C2A811",
-                  color: "#00C2A8",
+                  padding: "10px 28px", fontSize: "12px", letterSpacing: "3px",
+                  textTransform: "uppercase", border: "1px solid #00C2A8",
+                  background: "#00C2A811", color: "#00C2A8",
                   cursor: loading ? "not-allowed" : "pointer",
-                  fontFamily: "Courier New, monospace",
-                  opacity: loading ? 0.5 : 1,
+                  fontFamily: "Courier New, monospace", opacity: loading ? 0.5 : 1,
                 }}>
                   {loading ? "Minteando..." : "Mint Character"}
                 </button>
               )}
               {connected && worldState && !character && (
                 <div style={{
-                  fontSize: "11px",
-                  color: "#6B7280",
-                  fontFamily: "Courier New, monospace",
-                  letterSpacing: "1px",
+                  fontSize: "11px", color: "#6B7280",
+                  fontFamily: "Courier New, monospace", letterSpacing: "1px",
                 }}>
-                  {!worldState ? "Inicializa el mundo para continuar"
-                    : "Mintea tu personaje para entrar al mundo"}
+                  Mintea tu personaje para entrar al mundo
                 </div>
               )}
             </div>
           )}
         </>
       )}
+
       <TxToast toasts={toasts} onRemove={removeToast} />
     </main>
   );

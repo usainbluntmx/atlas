@@ -59,8 +59,7 @@ export const IDL = {
     errors: [
         { code: 6000, name: "NameTooLong", msg: "El nombre no puede superar 32 caracteres" },
         { code: 6001, name: "UriTooLong", msg: "El URI no puede superar 200 caracteres" },
-        { code: 6002, name: "NoResourcesLeft", msg: "No quedan recursos en el mundo" },
-        { code: 6003, name: "NotOwner", msg: "No eres el dueño de este personaje" },
+        { code: 6002, name: "NotOwner", msg: "No eres el dueño de este personaje" },
     ],
     types: [
         {

@@ -42,14 +42,20 @@ pub mod atlas {
         let leaderboard = &mut ctx.accounts.leaderboard;
 
         require!(
-            world.resources_collected < world.total_resources,
-            AtlasError::NoResourcesLeft
-        );
-
-        require!(
             character.owner == ctx.accounts.owner.key(),
             AtlasError::NotOwner
         );
+
+        // Auto-reset when world is exhausted
+        if world.resources_collected >= world.total_resources {
+            world.resources_collected = 0;
+            // Reset all leaderboard entries resources for new epoch
+            for entry in leaderboard.entries.iter_mut() {
+                entry.resources_collected = 0;
+            }
+            // Reset character epoch resources
+            character.resources_collected = 0;
+        }
 
         let _points: u64 = match resource_type {
             1 => 3,
@@ -79,7 +85,6 @@ pub mod atlas {
                     level,
                 });
             } else {
-                // Replace lowest if current is higher
                 if let Some(min_entry) = leaderboard.entries.iter_mut().min_by_key(|e| e.resources_collected) {
                     if collected > min_entry.resources_collected {
                         *min_entry = LeaderboardEntry {
@@ -93,7 +98,6 @@ pub mod atlas {
             }
         }
 
-        // Sort descending
         leaderboard.entries.sort_by(|a, b| b.resources_collected.cmp(&a.resources_collected));
 
         Ok(())
@@ -219,8 +223,6 @@ pub enum AtlasError {
     NameTooLong,
     #[msg("El URI no puede superar 200 caracteres")]
     UriTooLong,
-    #[msg("No quedan recursos en el mundo")]
-    NoResourcesLeft,
     #[msg("No eres el dueño de este personaje")]
     NotOwner,
 }
