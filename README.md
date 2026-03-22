@@ -68,6 +68,9 @@ El mundo es compartido: lo que un jugador recolecta ya no está disponible para 
 
 ## Arquitectura
 ```
+
+![Diagrama de arquitectura de Atlas](docs/architecture.png)
+
 atlas/
 ├── programs/atlas/src/lib.rs    # Smart contract (Anchor)
 │   ├── initialize_world()       # Crea el mundo compartido
@@ -80,7 +83,7 @@ atlas/
     ├── components/
     │   ├── HUD.tsx              # Interface de juego
     │   ├── GameCanvas.tsx       # Canvas de Phaser
-    │   ├── Landing.tsx          # Página de presentación
+    │   ├── Landing.tshx          # Página de presentación
     │   └── TxToast.tsx          # Notificaciones de transacciones
     ├── game/
     │   ├── scenes/WorldScene.ts # Mundo 2D en Phaser
