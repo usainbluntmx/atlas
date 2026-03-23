@@ -26,10 +26,12 @@ export interface Resource {
 }
 
 const RESOURCE_CONFIG = [
-    { frame: 0, color: 0x00C2A8, label: "COMMON", points: 1 },
-    { frame: 1, color: 0x818CF8, label: "RARE", points: 3 },
+    { frame: 4, color: 0x00C2A8, label: "COMMON", points: 1 },
+    { frame: 0, color: 0x818CF8, label: "RARE", points: 3 },
     { frame: 2, color: 0xF59E0B, label: "EPIC", points: 5 },
 ];
+
+const TYPE_DISTRIBUTION = [0, 0, 0, 0, 0, 0, 1, 1, 1, 2];
 
 const TILE_SIZE = 16;
 const SCALE = 3;
@@ -38,6 +40,7 @@ export default class WorldScene extends Phaser.Scene {
     private player: Phaser.GameObjects.Sprite | null = null;
     private nameLabel: Phaser.GameObjects.Text | null = null;
     private resourceSprites: Phaser.GameObjects.Sprite[] = [];
+    private resourceLabels: (Phaser.GameObjects.Text | null)[] = [];
     private resourceData: Resource[] = [];
     private collectCooldown = false;
     private cursors: Phaser.Types.Input.Keyboard.CursorKeys | null = null;
@@ -80,70 +83,8 @@ export default class WorldScene extends Phaser.Scene {
         }
 
         this.createAnimations();
+        this.spawnResources(width, height);
 
-        // Spawn resources en zonas seguras
-        const typeDistribution = [0, 0, 0, 0, 0, 0, 1, 1, 1, 2];
-
-        const isBlocked = (x: number, y: number): boolean => {
-            const nearTree = this.treePositions.some(t =>
-                Math.sqrt((x - t.x) ** 2 + (y - t.y) ** 2) < 60
-            );
-            const nearRock = this.rockPositions.some(r =>
-                Math.sqrt((x - r.x) ** 2 + (y - r.y) ** 2) < 50
-            );
-            const nearEdge = x < 100 || x > width - 100 || y < 120 || y > height - 100;
-            return nearTree || nearRock || nearEdge;
-        };
-
-        this.resourceData = Array.from({ length: 10 }, (_, i) => {
-            let x = 0, y = 0;
-            let attempts = 0;
-            do {
-                x = Phaser.Math.Between(100, width - 100);
-                y = Phaser.Math.Between(120, height - 100);
-                attempts++;
-            } while (isBlocked(x, y) && attempts < 100);
-
-            return { id: i, x, y, collected: false, type: typeDistribution[i] };
-        });
-
-        this.resourceSprites = [];
-        this.resourceData.forEach((r) => {
-            const cfg = RESOURCE_CONFIG[r.type];
-            const sprite = this.add.sprite(r.x, r.y, "objects", cfg.frame);
-            sprite.setScale(SCALE);
-            sprite.setDepth(6);
-
-            this.tweens.add({
-                targets: sprite,
-                y: r.y - 6,
-                duration: 1200 + Phaser.Math.Between(0, 400),
-                yoyo: true,
-                repeat: -1,
-                ease: "Sine.easeInOut",
-            });
-
-            if (r.type > 0) {
-                const label = this.add.text(r.x, r.y - 30, cfg.label, {
-                    fontSize: "7px",
-                    color: `#${cfg.color.toString(16).padStart(6, '0')}`,
-                    fontFamily: "Courier New, monospace",
-                    letterSpacing: 1,
-                }).setOrigin(0.5).setDepth(7);
-                this.tweens.add({
-                    targets: label,
-                    y: r.y - 36,
-                    duration: 1200 + Phaser.Math.Between(0, 400),
-                    yoyo: true,
-                    repeat: -1,
-                    ease: "Sine.easeInOut",
-                });
-            }
-
-            this.resourceSprites.push(sprite);
-        });
-
-        // Player
         this.player = this.add.sprite(width / 2, height / 2, "character", 0);
         this.player.setScale(SCALE);
         this.player.setDepth(8);
@@ -169,6 +110,143 @@ export default class WorldScene extends Phaser.Scene {
             color: "#3A5C28",
             fontFamily: "Courier New, monospace",
         }).setOrigin(1, 1).setDepth(10);
+    }
+
+    private getRandomPosition(width: number, height: number): { x: number; y: number } {
+        const isBlocked = (x: number, y: number): boolean => {
+            const nearTree = this.treePositions.some(t =>
+                Math.sqrt((x - t.x) ** 2 + (y - t.y) ** 2) < 60
+            );
+            const nearRock = this.rockPositions.some(r =>
+                Math.sqrt((x - r.x) ** 2 + (y - r.y) ** 2) < 50
+            );
+            const nearEdge = x < 100 || x > width - 100 || y < 120 || y > height - 100;
+            return nearTree || nearRock || nearEdge;
+        };
+
+        let x = 0, y = 0;
+        let attempts = 0;
+        do {
+            x = Phaser.Math.Between(100, width - 100);
+            y = Phaser.Math.Between(120, height - 100);
+            attempts++;
+        } while (isBlocked(x, y) && attempts < 100);
+
+        return { x, y };
+    }
+
+    private spawnResources(width: number, height: number) {
+        this.resourceSprites = [];
+        this.resourceLabels = [];
+        this.resourceData = [];
+
+        for (let i = 0; i < 10; i++) {
+            const { x, y } = this.getRandomPosition(width, height);
+            const type = TYPE_DISTRIBUTION[i];
+            this.resourceData.push({ id: i, x, y, collected: false, type });
+
+            const cfg = RESOURCE_CONFIG[type];
+            const sprite = this.add.sprite(x, y, "objects", cfg.frame);
+            sprite.setScale(SCALE);
+            sprite.setDepth(6);
+
+            this.tweens.add({
+                targets: sprite,
+                y: y - 6,
+                duration: 1200 + Phaser.Math.Between(0, 400),
+                yoyo: true,
+                repeat: -1,
+                ease: "Sine.easeInOut",
+            });
+
+            const label = this.add.text(x, y - 30, cfg.label, {
+                fontSize: "7px",
+                color: `#${cfg.color.toString(16).padStart(6, '0')}`,
+                fontFamily: "Courier New, monospace",
+                letterSpacing: 1,
+            }).setOrigin(0.5).setDepth(7);
+
+            this.tweens.add({
+                targets: label,
+                y: y - 36,
+                duration: 1200 + Phaser.Math.Between(0, 400),
+                yoyo: true,
+                repeat: -1,
+                ease: "Sine.easeInOut",
+            });
+
+            this.resourceSprites.push(sprite);
+            this.resourceLabels.push(label);
+        }
+    }
+
+    private respawnResource(index: number, width: number, height: number) {
+        const { x, y } = this.getRandomPosition(width, height);
+        const newType = TYPE_DISTRIBUTION[Phaser.Math.Between(0, 9)];
+        const cfg = RESOURCE_CONFIG[newType];
+
+        this.resourceData[index] = { id: index, x, y, collected: false, type: newType };
+
+        const sprite = this.resourceSprites[index];
+
+        // Kill all existing tweens on sprite and label before adding new ones
+        this.tweens.killTweensOf(sprite);
+        const label = this.resourceLabels[index];
+        if (label) this.tweens.killTweensOf(label);
+
+        sprite.setPosition(x, y);
+        sprite.setFrame(cfg.frame);
+        sprite.setVisible(true);
+        sprite.setAlpha(0);
+        sprite.setScale(0);
+
+        // Appear animation
+        this.tweens.add({
+            targets: sprite,
+            alpha: 1,
+            scaleX: SCALE,
+            scaleY: SCALE,
+            duration: 400,
+            ease: "Back.easeOut",
+            onComplete: () => {
+                // Float tween only after appear is done
+                this.tweens.add({
+                    targets: sprite,
+                    y: y - 6,
+                    duration: 1200 + Phaser.Math.Between(0, 400),
+                    yoyo: true,
+                    repeat: -1,
+                    ease: "Sine.easeInOut",
+                });
+            },
+        });
+
+        if (label) {
+            label.setPosition(x, y - 30);
+            label.setText(cfg.label);
+            label.setStyle({ color: `#${cfg.color.toString(16).padStart(6, '0')}` });
+            label.setVisible(true);
+            label.setAlpha(0);
+
+            this.tweens.add({
+                targets: label,
+                alpha: 1,
+                duration: 400,
+                delay: 300,
+                ease: "Linear",
+                onComplete: () => {
+                    // Float tween only after appear is done
+                    this.tweens.add({
+                        targets: label,
+                        y: y - 36,
+                        duration: 1200 + Phaser.Math.Between(0, 400),
+                        yoyo: true,
+                        repeat: -1,
+                        ease: "Sine.easeInOut",
+                    });
+                },
+            });
+        }
     }
 
     private createAnimations() {
@@ -207,7 +285,6 @@ export default class WorldScene extends Phaser.Scene {
         this.add.rectangle(width / 2, height / 2, width, height, 0x2D4A1E).setDepth(0);
 
         const g = this.add.graphics().setDepth(0);
-
         for (let ty = 0; ty < tilesY; ty++) {
             for (let tx = 0; tx < tilesX; tx++) {
                 const px = tx * TILE_SIZE * SCALE;
@@ -268,6 +345,7 @@ export default class WorldScene extends Phaser.Scene {
     update() {
         if (!this.player || !this.cursors) return;
 
+        const { width, height } = this.scale;
         let vx = 0;
         let vy = 0;
         let moving = false;
@@ -284,9 +362,14 @@ export default class WorldScene extends Phaser.Scene {
             vy *= 0.707;
         }
 
-        const { width, height } = this.scale;
-        this.player.x = Phaser.Math.Clamp(this.player.x + vx * (1 / 60), 20, width - 20);
-        this.player.y = Phaser.Math.Clamp(this.player.y + vy * (1 / 60), 60, height - 40);
+        this.player.x += vx * (1 / 60);
+        this.player.y += vy * (1 / 60);
+
+        // World wrapping
+        if (this.player.x < 0) this.player.x = width;
+        if (this.player.x > width) this.player.x = 0;
+        if (this.player.y < 0) this.player.y = height;
+        if (this.player.y > height) this.player.y = 0;
 
         if (this.nameLabel) {
             this.nameLabel.x = this.player.x;
@@ -321,15 +404,32 @@ export default class WorldScene extends Phaser.Scene {
             if (dist < 32) {
                 r.collected = true;
                 const sprite = this.resourceSprites[i];
+                const label = this.resourceLabels[i];
                 const cfg = RESOURCE_CONFIG[r.type];
+
+                this.tweens.killTweensOf(sprite);
 
                 this.tweens.add({
                     targets: sprite,
                     scaleX: 0, scaleY: 0, alpha: 0,
                     duration: 300,
                     ease: "Quad.easeIn",
-                    onComplete: () => sprite.setVisible(false),
+                    onComplete: () => {
+                        this.time.delayedCall(3000, () => {
+                            this.respawnResource(i, this.scale.width, this.scale.height);
+                        });
+                    },
                 });
+
+                if (label) {
+                    this.tweens.killTweensOf(label);
+                    this.tweens.add({
+                        targets: label,
+                        alpha: 0,
+                        duration: 300,
+                        ease: "Linear",
+                    });
+                }
 
                 const popup = this.add.text(r.x, r.y - 20, `+${cfg.points}`, {
                     fontSize: "14px",
