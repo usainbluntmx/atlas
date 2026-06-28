@@ -3,59 +3,67 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { PublicKey } from "@solana/web3.js";
-import { getProgram, getWorldPDA, getCharacterPDA, getLeaderboardPDA } from "@/lib/anchor";
+import {
+  getProgram,
+  getWorldPDA,
+  getCharacterPDA,
+  getLeaderboardPDA,
+  fetchAllState,
+} from "@/lib/anchor";
+import { parseError } from "@/lib/errors";
+import { PROGRAM_ID, RESOURCE_POINTS, TOTAL_RESOURCES } from "@/lib/constants";
+import type { WorldState, Character, LeaderboardEntry, TxToast as TxToastItem } from "@/lib/types";
 import HUD from "@/components/HUD";
-import TxToast, { type Toast } from "@/components/TxToast";
+import TxToastComponent from "@/components/TxToast";
 import Landing from "@/components/Landing";
 import dynamic from "next/dynamic";
 
 const GameCanvas = dynamic(() => import("@/components/GameCanvas"), { ssr: false });
 
-const PROGRAM_ID = new PublicKey("J5qe5PAK9XHLqbLmfxZ7BN1xFsPxYRKaxMc9qhw9fNxi");
-
 export default function Home() {
   const wallet = useWallet();
   const { connected, publicKey } = wallet;
 
-  const [worldState, setWorldState] = useState<{
-    totalResources: number;
-    resourcesCollected: number;
-  } | null>(null);
-
-  const [character, setCharacter] = useState<{
-    name: string;
-    level: number;
-    resourcesCollected: number;
-  } | null>(null);
-
-  const [loading, setLoading] = useState(false);
-  const [leaderboard, setLeaderboard] = useState<{
-    owner: string;
-    name: string;
-    resourcesCollected: number;
-    level: number;
-  }[]>([]);
-  const [showLeaderboard, setShowLeaderboard] = useState(false);
+  // ─── Estado principal ────────────────────────────────────────────────────
+  const [worldState, setWorldState] = useState<WorldState | null>(null);
+  const [character, setCharacter] = useState<Character | null>(null);
+  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [leaderboardReady, setLeaderboardReady] = useState(false);
+
+  // ─── UI state ────────────────────────────────────────────────────────────
+  const [loading, setLoading] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(false);
+  const [showLeaderboard, setShowLeaderboard] = useState(false);
   const [sessionScore, setSessionScore] = useState(0);
-  const [toasts, setToasts] = useState<Toast[]>([]);
-  const [worldExhausted, setWorldExhausted] = useState(false);
+  const [toasts, setToasts] = useState<TxToastItem[]>([]);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [generatingWorld, setGeneratingWorld] = useState(false);
 
+  // ─── Refs para callbacks estables (evita closure stale) ──────────────────
   const toastIdRef = useRef(0);
   const walletRef = useRef(wallet);
   const publicKeyRef = useRef(publicKey);
   const connectedRef = useRef(connected);
+  const worldStateRef = useRef(worldState);
 
   useEffect(() => { walletRef.current = wallet; }, [wallet]);
   useEffect(() => { publicKeyRef.current = publicKey; }, [publicKey]);
   useEffect(() => { connectedRef.current = connected; }, [connected]);
+  useEffect(() => { worldStateRef.current = worldState; }, [worldState]);
+
+  // ─── Helpers de UI ───────────────────────────────────────────────────────
+  const showError = useCallback((msg: string) => {
+    setErrorMsg(msg);
+    setTimeout(() => setErrorMsg(null), 5000);
+  }, []);
 
   const addToast = useCallback((signature: string, resourceType: number) => {
     const id = ++toastIdRef.current;
     setToasts(prev => [...prev, {
-      id, signature, resourceType,
-      points: resourceType === 2 ? 5 : resourceType === 1 ? 3 : 1
+      id,
+      signature,
+      resourceType,
+      points: RESOURCE_POINTS[resourceType] ?? 1,
     }]);
   }, []);
 
@@ -63,86 +71,96 @@ export default function Home() {
     setToasts(prev => prev.filter(t => t.id !== id));
   }, []);
 
+  // ─── Fetch de estado ─────────────────────────────────────────────────────
   const fetchState = useCallback(async () => {
     if (!connected || !publicKey) return;
-    try {
-      const program = getProgram(wallet);
-      const [worldPDA] = getWorldPDA(PROGRAM_ID);
-      try {
-        const world = await (program.account as any).worldState.fetch(worldPDA);
-        const resourcesCollected = Number(world.resourcesCollected);
-        const totalResources = Number(world.totalResources);
-        setWorldState({ totalResources, resourcesCollected });
-        setWorldExhausted(resourcesCollected >= totalResources);
-      } catch {
-        setWorldState(null);
-      }
-
-      const [characterPDA] = getCharacterPDA(publicKey, PROGRAM_ID);
-      try {
-        const char = await (program.account as any).character.fetch(characterPDA);
-        setCharacter({
-          name: char.name,
-          level: Number(char.level),
-          resourcesCollected: Number(char.resourcesCollected),
-        });
-      } catch {
-        setCharacter(null);
-      }
-
-      const [leaderboardPDA] = getLeaderboardPDA(PROGRAM_ID);
-      try {
-        const lb = await (program.account as any).leaderboard.fetch(leaderboardPDA);
-        setLeaderboard(lb.entries.map((e: any) => ({
-          owner: e.owner.toBase58(),
-          name: e.name,
-          resourcesCollected: Number(e.resourcesCollected),
-          level: Number(e.level),
-        })));
-        setLeaderboardReady(true);
-      } catch {
-        setLeaderboardReady(false);
-      }
-    } catch (e) {
-      console.error(e);
-    }
+    setInitialLoading(true);
+    const program = getProgram(wallet);
+    const state = await fetchAllState(program, publicKey);
+    setWorldState(state.world);
+    setCharacter(state.character);
+    setLeaderboard(state.leaderboard);
+    setLeaderboardReady(state.leaderboardReady);
+    setInitialLoading(false);
   }, [connected, publicKey, wallet]);
 
   useEffect(() => {
     fetchState();
   }, [fetchState]);
 
+  // ─── Suscripción a eventos on-chain ──────────────────────────────────────
+  // Reemplaza el polling — el HUD se actualiza en tiempo real via WebSocket
+  useEffect(() => {
+    if (!connected || !publicKey) return;
+    const program = getProgram(wallet);
+
+    const resourceListener = program.addEventListener(
+      "ResourceCollected",
+      async () => {
+        // Re-fetch cuando cualquier jugador recolecta (no solo nosotros)
+        const state = await fetchAllState(program, publicKey);
+        setWorldState(state.world);
+        setLeaderboard(state.leaderboard);
+      }
+    );
+
+    const resetListener = program.addEventListener(
+      "WorldReset",
+      async () => {
+        setGeneratingWorld(true);
+        setSessionScore(0);
+        await fetchState();
+        setTimeout(() => setGeneratingWorld(false), 3000);
+      }
+    );
+
+    return () => {
+      program.removeEventListener(resourceListener);
+      program.removeEventListener(resetListener);
+    };
+  }, [connected, publicKey]);
+
+  // ─── Acciones del contrato ───────────────────────────────────────────────
+
   const handleInitWorld = async () => {
-    if (!connected) return;
+    if (!connected || !publicKey) return;
     setLoading(true);
     try {
+      const { BN } = await import("@coral-xyz/anchor");
       const program = getProgram(wallet);
-      const [worldPDA] = getWorldPDA(PROGRAM_ID);
+      const [worldPDA] = getWorldPDA();
       await (program.methods as any)
-        .initializeWorld()
+        .initializeWorld(new BN(TOTAL_RESOURCES))
         .accounts({ world: worldPDA, authority: publicKey })
         .rpc();
       await fetchState();
-    } catch (e) {
-      console.error(e);
+    } catch (err) {
+      const { message } = parseError(err);
+      showError(message);
     } finally {
       setLoading(false);
     }
   };
 
   const handleInitLeaderboard = async () => {
-    if (!connected) return;
+    if (!connected || !publicKey || !worldState) return;
     setLoading(true);
     try {
       const program = getProgram(wallet);
-      const [leaderboardPDA] = getLeaderboardPDA(PROGRAM_ID);
+      const [worldPDA] = getWorldPDA();
+      const [leaderboardPDA] = getLeaderboardPDA(worldState.epoch);
       await (program.methods as any)
         .initializeLeaderboard()
-        .accounts({ leaderboard: leaderboardPDA, authority: publicKey })
+        .accounts({
+          world: worldPDA,
+          leaderboard: leaderboardPDA,
+          authority: publicKey,
+        })
         .rpc();
       await fetchState();
-    } catch (e) {
-      console.error(e);
+    } catch (err) {
+      const { message } = parseError(err);
+      showError(message);
     } finally {
       setLoading(false);
     }
@@ -155,34 +173,42 @@ export default function Home() {
       const { uploadCharacterMetadata } = await import("@/lib/arweave");
       const name = `Explorer_${publicKey.toBase58().slice(0, 4)}`;
       const metadataUri = await uploadCharacterMetadata(wallet, name, 1);
+
       const program = getProgram(wallet);
-      const [characterPDA] = getCharacterPDA(publicKey, PROGRAM_ID);
+      const [characterPDA] = getCharacterPDA(publicKey);
       await (program.methods as any)
         .mintCharacter(name, metadataUri)
         .accounts({ character: characterPDA, owner: publicKey })
         .rpc();
       await fetchState();
-    } catch (e) {
-      console.error(e);
+    } catch (err) {
+      const { message } = parseError(err);
+      showError(message);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleCollectResource = useCallback(async (_id: number, resourceType: number = 0) => {
+  const handleCollectResource = useCallback(async (
+    _id: number,
+    resourceType: number = 0
+  ) => {
     const currentPublicKey = publicKeyRef.current;
     const currentWallet = walletRef.current;
     const currentConnected = connectedRef.current;
-    if (!currentConnected || !currentPublicKey) return;
+    const currentWorld = worldStateRef.current;
 
-    const points = resourceType === 2 ? 5 : resourceType === 1 ? 3 : 1;
+    if (!currentConnected || !currentPublicKey || !currentWorld) return;
+
+    // Actualización optimista del score de sesión
+    const points = RESOURCE_POINTS[resourceType] ?? 1;
     setSessionScore(prev => prev + points);
 
     try {
       const program = getProgram(currentWallet);
-      const [worldPDA] = getWorldPDA(PROGRAM_ID);
-      const [characterPDA] = getCharacterPDA(currentPublicKey, PROGRAM_ID);
-      const [leaderboardPDA] = getLeaderboardPDA(PROGRAM_ID);
+      const [worldPDA] = getWorldPDA();
+      const [characterPDA] = getCharacterPDA(currentPublicKey);
+      const [leaderboardPDA] = getLeaderboardPDA(currentWorld.epoch);
 
       const signature = await (program.methods as any)
         .collectResource(resourceType)
@@ -195,92 +221,91 @@ export default function Home() {
         .rpc();
 
       addToast(signature, resourceType);
-      await new Promise((r) => setTimeout(r, 2000));
 
-      const program2 = getProgram(currentWallet);
-      const world = await (program2.account as any).worldState.fetch(worldPDA);
-      const char = await (program2.account as any).character.fetch(characterPDA);
-      const lb = await (program2.account as any).leaderboard.fetch(leaderboardPDA);
+      // Re-fetch estado después de confirmar
+      await new Promise(r => setTimeout(r, 1500));
+      const state = await fetchAllState(program, currentPublicKey);
+      setWorldState(state.world);
+      setCharacter(state.character);
+      setLeaderboard(state.leaderboard);
+      setLeaderboardReady(state.leaderboardReady);
 
-      const resourcesCollected = Number(world.resourcesCollected);
-      const totalResources = Number(world.totalResources);
-
-      if (resourcesCollected === 0 || resourcesCollected < (worldState?.resourcesCollected ?? 0)) {
-        setGeneratingWorld(true);
-        setTimeout(() => {
-          setGeneratingWorld(false);
-          setWorldExhausted(false);
-          setSessionScore(0);
-        }, 3000);
-      }
-
-      setWorldExhausted(resourcesCollected >= totalResources);
-      setWorldState({ totalResources, resourcesCollected });
-      setCharacter({
-        name: char.name,
-        level: Number(char.level),
-        resourcesCollected: Number(char.resourcesCollected),
-      });
-      setLeaderboard(lb.entries.map((e: any) => ({
-        owner: e.owner.toBase58(),
-        name: e.name,
-        resourcesCollected: Number(e.resourcesCollected),
-        level: Number(e.level),
-      })));
-      setLeaderboardReady(true);
-
-    } catch (e) {
-      console.error(e);
+    } catch (err) {
+      // Revertir actualización optimista del score si falló
+      setSessionScore(prev => prev - points);
+      const { message } = parseError(err);
+      showError(message);
     }
-  }, []);
+  }, [addToast, showError]);
 
+  // ─── Render ───────────────────────────────────────────────────────────────
   const showGame = connected && worldState !== null && character !== null;
+  const worldExhausted = worldState
+    ? worldState.resourcesCollected >= worldState.totalResources
+    : false;
 
   return (
     <main style={{ width: "100vw", height: "100vh", overflow: "hidden", background: "#080A0F" }}>
 
-      {generatingWorld && (
+      {/* Loading inicial — evita flash entre Landing y Game */}
+      {initialLoading && (
         <div style={{
-          position: "fixed", inset: 0, zIndex: 300,
-          background: "#04060A",
-          display: "flex", flexDirection: "column",
-          alignItems: "center", justifyContent: "center",
-          gap: "24px",
+          position: "fixed", inset: 0, zIndex: 500, background: "#04060A",
+          display: "flex", alignItems: "center", justifyContent: "center",
         }}>
           <div style={{
-            width: "40px", height: "40px",
-            border: "2px solid #00C2A8",
-            transform: "rotate(45deg)",
-            animation: "spin 1s linear infinite",
+            width: "32px", height: "32px", border: "2px solid #00C2A8",
+            transform: "rotate(45deg)", animation: "spin 1s linear infinite",
           }} />
-          <div style={{
-            fontSize: "13px", letterSpacing: "6px",
-            color: "#00C2A8", textTransform: "uppercase",
-            fontFamily: "Courier New, monospace",
-          }}>
-            Generando nuevo mundo...
-          </div>
-          <style>{`
-            @keyframes spin {
-              0% { transform: rotate(45deg); }
-              100% { transform: rotate(405deg); }
-            }
-          `}</style>
+          <style>{`@keyframes spin { 0% { transform: rotate(45deg); } 100% { transform: rotate(405deg); } }`}</style>
         </div>
       )}
 
+      {/* Error toast */}
+      {errorMsg && (
+        <div style={{
+          position: "fixed", top: "72px", left: "50%", transform: "translateX(-50%)",
+          zIndex: 400, background: "#1A0A0A", border: "1px solid #EF444466",
+          borderLeft: "3px solid #EF4444", padding: "10px 20px",
+          fontFamily: "Courier New, monospace", fontSize: "12px",
+          color: "#EF4444", letterSpacing: "1px", whiteSpace: "nowrap",
+        }}>
+          ✕ {errorMsg}
+        </div>
+      )}
+
+      {/* Generando mundo */}
+      {generatingWorld && (
+        <div style={{
+          position: "fixed", inset: 0, zIndex: 300, background: "#04060A",
+          display: "flex", flexDirection: "column",
+          alignItems: "center", justifyContent: "center", gap: "24px",
+        }}>
+          <div style={{
+            width: "40px", height: "40px", border: "2px solid #00C2A8",
+            transform: "rotate(45deg)", animation: "spin 1s linear infinite",
+          }} />
+          <div style={{
+            fontSize: "13px", letterSpacing: "6px", color: "#00C2A8",
+            textTransform: "uppercase", fontFamily: "Courier New, monospace",
+          }}>
+            Generando nuevo mundo...
+          </div>
+          <style>{`@keyframes spin { 0% { transform: rotate(45deg); } 100% { transform: rotate(405deg); } }`}</style>
+        </div>
+      )}
+
+      {/* Mundo agotado */}
       {worldExhausted && !generatingWorld && showGame && (
         <div style={{
-          position: "fixed", inset: 0, zIndex: 250,
-          background: "#04060ACC",
+          position: "fixed", inset: 0, zIndex: 250, background: "#04060ACC",
           display: "flex", flexDirection: "column",
           alignItems: "center", justifyContent: "center",
           gap: "16px", backdropFilter: "blur(4px)",
         }}>
           <div style={{
             fontSize: "40px", fontWeight: 900,
-            fontFamily: "Georgia, serif", color: "#F59E0B",
-            letterSpacing: "-1px",
+            fontFamily: "Georgia, serif", color: "#F59E0B", letterSpacing: "-1px",
           }}>Mundo Agotado</div>
           <div style={{
             fontSize: "13px", color: "#9CA3AF",
@@ -288,15 +313,13 @@ export default function Home() {
             textAlign: "center", maxWidth: "400px", lineHeight: 1.7,
           }}>
             Todos los recursos han sido recolectados.<br />
-            El siguiente explorador que intente recolectar<br />
-            generará un nuevo mundo automáticamente.
+            El siguiente explorador generará un nuevo mundo.
           </div>
           <div style={{
             fontSize: "11px", color: "#4A5568",
-            fontFamily: "Courier New, monospace", letterSpacing: "2px",
-            marginTop: "8px",
+            fontFamily: "Courier New, monospace", letterSpacing: "2px", marginTop: "8px",
           }}>
-            {worldState?.resourcesCollected}/{worldState?.totalResources} RECURSOS RECOLECTADOS
+            EPOCH {worldState?.epoch} · {worldState?.resourcesCollected}/{worldState?.totalResources} RECURSOS
           </div>
         </div>
       )}
@@ -313,6 +336,7 @@ export default function Home() {
         leaderboardReady={leaderboardReady}
         showLeaderboard={showLeaderboard}
         onToggleLeaderboard={() => setShowLeaderboard(prev => !prev)}
+        epoch={worldState?.epoch ?? 0}
       />
 
       {showGame && (
@@ -325,7 +349,7 @@ export default function Home() {
 
       {!showGame && <Landing />}
 
-      <TxToast toasts={toasts} onRemove={removeToast} />
+      <TxToastComponent toasts={toasts} onRemove={removeToast} />
     </main>
   );
 }

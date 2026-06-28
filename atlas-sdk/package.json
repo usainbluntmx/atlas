@@ -1,0 +1,16 @@
+{
+  "name": "atlas-world-protocol",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Atlas World Protocol — Persistent World SDK for Solana",
+  "scripts": {
+    "build": "pnpm -r build",
+    "dev": "pnpm -r dev",
+    "lint": "pnpm -r lint",
+    "test": "pnpm -r test",
+    "clean": "pnpm -r clean"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3"
+  }
+}
